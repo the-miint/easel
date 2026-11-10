@@ -37,7 +37,11 @@
 #include <math.h>
 #include <float.h>
 
-#include <x86intrin.h>
+/* miint: was <x86intrin.h>; see esl_sse.h. */
+#include <emmintrin.h>   /* SSE2 */
+#ifdef eslENABLE_SSE4
+#include <smmintrin.h>   /* SSE4.1 */
+#endif
 
 #include "easel.h"
 #include "esl_sse.h"

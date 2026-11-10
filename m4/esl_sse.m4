@@ -48,9 +48,11 @@ AC_DEFUN([ESL_SSE], [
       *)    CFLAGS="$save_CFLAGS $esl_sse_cflags";;
     esac
 
+    dnl miint: <emmintrin.h>, not <x86intrin.h>, which exists only for
+    dnl x86 targets; see esl_sse.h.
     AC_LINK_IFELSE(
       [AC_LANG_SOURCE([[
-#include <x86intrin.h>
+#include <emmintrin.h>
 #include <stdint.h>
 int stub_sse(void) {
 __m128i v1 = _mm_set1_epi32(42);

@@ -22,7 +22,14 @@
 #include "easel.h"
 
 #include <stdio.h>
-#include <x86intrin.h>	
+/* miint: was <x86intrin.h>, which exists only for x86 targets (clang's
+ * #errors anywhere else). SSE2 and SSE4.1 have their own headers, which
+ * Emscripten also provides, emulating SSE on wasm SIMD128.
+ */
+#include <emmintrin.h>   /* SSE2 */
+#ifdef eslENABLE_SSE4
+#include <smmintrin.h>   /* SSE4.1 */
+#endif
 
 
 /*****************************************************************
