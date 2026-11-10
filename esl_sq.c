@@ -2671,25 +2671,26 @@ ERROR:
   return;
 }
 
-/* dirty_heap_for_sq()
- * A fresh heap is often zeroed, which hides fields a constructor
- * forgot to set. Free a 0xa5-filled block of sizeof(ESL_SQ): common
- * allocators (glibc's tcache) hand it straight back to the next
- * ESL_SQ allocation. 0xa5, not 0xff, because all-ones reads back as
- * -1, the correct "unset" value for tax_id and idx. The fill goes
- * through a volatile pointer, one byte at a time, because the
- * compiler deletes a memset() into memory that is freed right after
- * (gcc -O3 does). Under valgrind, the uninitialized reads are
- * reported instead.
+/* dirty_heap()
+ * A fresh heap is often zeroed, which hides fields code forgot to
+ * set. Free a 0xa5-filled block of <size> bytes: common allocators
+ * (glibc's tcache) hand it straight back to the next allocation of
+ * that size. glibc keeps its free-list fields in the block's first 16
+ * bytes, so only bytes past those are sure to read back as 0xa5.
+ * 0xa5, not 0xff, because all-ones reads back as -1, the correct
+ * "unset" value for tax_id and idx. The fill goes through a volatile
+ * pointer, one byte at a time, because the compiler deletes a
+ * memset() into memory that is freed right after (gcc -O3 does).
+ * Under valgrind, the uninitialized reads are reported instead.
  */
 static void
-dirty_heap_for_sq(void)
+dirty_heap(size_t size)
 {
-  volatile unsigned char *junk = malloc(sizeof(ESL_SQ));
+  volatile unsigned char *junk = malloc(size);
   size_t                  i;
 
-  if (junk == NULL) esl_fatal("dirty_heap_for_sq() failed");
-  for (i = 0; i < sizeof(ESL_SQ); i++) junk[i] = 0xa5;
+  if (junk == NULL) esl_fatal("dirty_heap() failed");
+  for (i = 0; i < size; i++) junk[i] = 0xa5;
   free((void *) junk);
 }
 
@@ -2717,13 +2718,13 @@ utest_CreateFromIsInitialized(void)
   if (abc == NULL)                                 esl_fatal(msg);
   if (esl_abc_CreateDsq(abc, seq, &dsq) != eslOK) esl_fatal(msg);
 
-  dirty_heap_for_sq();
+  dirty_heap(sizeof(ESL_SQ));
   if ((sq = esl_sq_CreateFrom("seqname", seq, NULL, NULL, NULL)) == NULL) esl_fatal(msg);
   if (esl_sq_Validate(sq, errbuf) != eslOK) esl_fatal("%s: CreateFrom: %s", msg, errbuf);
   if (sq->idx != -1)                        esl_fatal("%s: CreateFrom: idx not initialized", msg);
   esl_sq_Destroy(sq);
 
-  dirty_heap_for_sq();
+  dirty_heap(sizeof(ESL_SQ));
   if ((sq = esl_sq_CreateDigitalFrom(abc, "seqname", dsq, strlen(seq), NULL, NULL, NULL)) == NULL) esl_fatal(msg);
   if (esl_sq_Validate(sq, errbuf) != eslOK) esl_fatal("%s: CreateDigitalFrom: %s", msg, errbuf);
   if (sq->idx != -1)                        esl_fatal("%s: CreateDigitalFrom: idx not initialized", msg);
@@ -2769,6 +2770,50 @@ utest_CopyLongMarkupTag(void)
   if (dst->nxr                          != 1)     esl_fatal(msg);
   if (strcmp(dst->xr_tag[0], tag)       != 0)     esl_fatal(msg);
   if (strcmp(dst->xr[0],     "x.x.")    != 0)     esl_fatal(msg);
+
+  esl_sq_Destroy(src);
+  esl_sq_Destroy(dst);
+  return;
+
+ ERROR:
+  esl_fatal(msg);
+}
+
+/* utest_CopyNullMarkup()
+ * miint: esl_sq_Copy() must copy an extra residue markup whose tag or
+ * annotation is NULL as NULL, so the copy compares equal and can be
+ * destroyed. After 2c5f4b1, a NULL source tag left dst->xr_tag[x]
+ * uninitialized (esl_sq_Destroy() then frees a wild pointer), and a
+ * NULL source annotation got an allocated, uninitialized dst->xr[x].
+ * Fixed upstream in 3fd1f3f.
+ *
+ * The NULL tag is markup 2, so its slot in dst->xr_tag lies past the
+ * allocator's free-list fields and reads back as dirty_heap()'s fill.
+ */
+static void
+utest_CopyNullMarkup(void)
+{
+  char    msg[] = "utest_CopyNullMarkup() failed";
+  ESL_SQ *src = esl_sq_CreateFrom("seqname", "ACGT", NULL, NULL, NULL);
+  ESL_SQ *dst = esl_sq_Create();
+  int     status;
+
+  if (src == NULL || dst == NULL) esl_fatal(msg);
+  src->nxr = 3;
+  ESL_ALLOC(src->xr_tag, sizeof(char *) * src->nxr);
+  ESL_ALLOC(src->xr,     sizeof(char *) * src->nxr);
+  if (esl_strdup("tag0", -1, &(src->xr_tag[0])) != eslOK) esl_fatal(msg);  // markup 0: tag and annotation
+  if (esl_strdup("x.x.", -1, &(src->xr[0]))     != eslOK) esl_fatal(msg);
+  if (esl_strdup("tag1", -1, &(src->xr_tag[1])) != eslOK) esl_fatal(msg);  // markup 1: tag, no annotation
+  src->xr[1]     = NULL;
+  src->xr_tag[2] = NULL;                                                    // markup 2: annotation, no tag
+  if (esl_strdup("x..x", -1, &(src->xr[2]))     != eslOK) esl_fatal(msg);
+
+  dirty_heap(sizeof(char *) * src->nxr);  // esl_sq_Copy()'s first allocation is dst->xr_tag
+  if (esl_sq_Copy(src, dst)    != eslOK) esl_fatal(msg);
+  if (dst->xr_tag[2]           != NULL)  esl_fatal("%s: NULL tag not copied as NULL", msg);
+  if (dst->xr[1]               != NULL)  esl_fatal("%s: NULL annotation not copied as NULL", msg);
+  if (esl_sq_Compare(src, dst) != eslOK) esl_fatal("%s: copy differs from source", msg);
 
   esl_sq_Destroy(src);
   esl_sq_Destroy(dst);
@@ -2827,6 +2872,7 @@ main(int argc, char **argv)
   utest_ExtraResMarkups();
   utest_CreateFromIsInitialized();
   utest_CopyLongMarkupTag();
+  utest_CopyNullMarkup();
 
   esl_randomness_Destroy(r);
   esl_getopts_Destroy(go);
