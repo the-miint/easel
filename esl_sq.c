@@ -2274,6 +2274,11 @@ sq_create_from(const char *name, const char *desc, const char *acc)
   sq->xr_tag = NULL;
   sq->xr     = NULL;
 
+  /* miint: the "unset" values esl_sq_Create() gives (via esl_sq_Reuse()).
+   * Upstream leaves both uninitialized here. */
+  sq->tax_id = -1;
+  sq->idx    = -1;
+
   /* coord bookkeeping has to be set by the parent caller,
    * because that's where we know the seq length <n>. We don't
    * know it here.
@@ -2670,6 +2675,67 @@ ERROR:
   return;
 }
 
+/* dirty_heap_for_sq()
+ * A fresh heap is often zeroed, which hides fields a constructor
+ * forgot to set. Free a 0xa5-filled block of sizeof(ESL_SQ): common
+ * allocators (glibc's tcache) hand it straight back to the next
+ * ESL_SQ allocation. 0xa5, not 0xff, because all-ones reads back as
+ * -1, the correct "unset" value for tax_id and idx. The fill goes
+ * through a volatile pointer, one byte at a time, because the
+ * compiler deletes a memset() into memory that is freed right after
+ * (gcc -O3 does). Under valgrind, the uninitialized reads are
+ * reported instead.
+ */
+static void
+dirty_heap_for_sq(void)
+{
+  volatile unsigned char *junk = malloc(sizeof(ESL_SQ));
+  size_t                  i;
+
+  if (junk == NULL) esl_fatal("dirty_heap_for_sq() failed");
+  for (i = 0; i < sizeof(ESL_SQ); i++) junk[i] = 0xa5;
+  free((void *) junk);
+}
+
+/* utest_CreateFromIsInitialized()
+ * miint: esl_sq_CreateFrom() and esl_sq_CreateDigitalFrom() must
+ * leave no field uninitialized.
+ *  - Text mode means abc == NULL. Code tells text from digital by
+ *    abc: esl_sq_Validate() rejects a text seq with an alphabet, and
+ *    esl_sq_Compare() dereferences a non-NULL abc. Easel iss #80:
+ *    CreateFrom() left abc uninitialized (fixed upstream in 0e561ee).
+ *  - tax_id and idx were left uninitialized by both constructors (not
+ *    fixed upstream). esl_sq_Validate() rejects tax_id < -1, and -1 is
+ *    the "unset" value esl_sq_Create() gives both.
+ */
+static void
+utest_CreateFromIsInitialized(void)
+{
+  char          msg[] = "utest_CreateFromIsInitialized() failed";
+  char          errbuf[eslERRBUFSIZE];
+  char         *seq   = "ACDEFGHIKLMNPQRSTVWY";
+  ESL_ALPHABET *abc   = esl_alphabet_Create(eslAMINO);
+  ESL_DSQ      *dsq   = NULL;
+  ESL_SQ       *sq    = NULL;
+
+  if (abc == NULL)                                 esl_fatal(msg);
+  if (esl_abc_CreateDsq(abc, seq, &dsq) != eslOK) esl_fatal(msg);
+
+  dirty_heap_for_sq();
+  if ((sq = esl_sq_CreateFrom("seqname", seq, NULL, NULL, NULL)) == NULL) esl_fatal(msg);
+  if (esl_sq_Validate(sq, errbuf) != eslOK) esl_fatal("%s: CreateFrom: %s", msg, errbuf);
+  if (sq->idx != -1)                        esl_fatal("%s: CreateFrom: idx not initialized", msg);
+  esl_sq_Destroy(sq);
+
+  dirty_heap_for_sq();
+  if ((sq = esl_sq_CreateDigitalFrom(abc, "seqname", dsq, strlen(seq), NULL, NULL, NULL)) == NULL) esl_fatal(msg);
+  if (esl_sq_Validate(sq, errbuf) != eslOK) esl_fatal("%s: CreateDigitalFrom: %s", msg, errbuf);
+  if (sq->idx != -1)                        esl_fatal("%s: CreateDigitalFrom: idx not initialized", msg);
+  esl_sq_Destroy(sq);
+
+  free(dsq);
+  esl_alphabet_Destroy(abc);
+}
 
 #endif /* eslSQ_TESTDRIVE*/
 /*--------------------- end, unit tests -------------------------*/
@@ -2718,6 +2784,7 @@ main(int argc, char **argv)
   utest_CreateDigital();
 
   utest_ExtraResMarkups();
+  utest_CreateFromIsInitialized();
 
   esl_randomness_Destroy(r);
   esl_getopts_Destroy(go);
