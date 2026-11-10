@@ -67,6 +67,17 @@ check_errmsg() {
 }
 if [ $native_ok = 1 ]; then check_errmsg; else fail "errmsg-pid1" "no native build"; fi
 
+# --- ftz-daz-off: configure never enables flush-to-zero / denormals-are-zero
+# FTZ and DAZ are per-thread CPU modes. miint never sets them, so that
+# its scores match an oracle built without them, and a library loaded into
+# someone else's process must not change that process's floating point.
+check_ftz_daz() {
+  local found
+  found=$(grep -E '^#define (HAVE_FLUSH_ZERO_MODE|HAVE_DENORMALS_ZERO_MODE)' "$NATIVE/esl_config.h")
+  if [ -z "$found" ]; then pass "ftz-daz-off"; else fail "ftz-daz-off" "esl_config.h has: $(echo $found)"; fi
+}
+if [ $native_ok = 1 ]; then check_ftz_daz; else fail "ftz-daz-off" "no native build"; fi
+
 # --- summary ------------------------------------------------------------
 echo "----"
 echo "$npass passed, $nfail failed, ${#skipped[@]} skipped"

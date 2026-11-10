@@ -382,33 +382,14 @@ fi
 
 
 
-# For x86 platforms, check if we can set floating point math to not
-# use denormalized floats. On some platforms, denormalized math incurs
-# a large performance penalty. The recursions in the Forward/Backward
-# algorithms underflow to zero by design.
-#
-esl_save_cflags="$CFLAGS"
-CFLAGS="$CFLAGS $SSE_CFLAGS $SSE4_CFLAGS"
-
-AC_MSG_CHECKING([whether flush-to-zero (FTZ) is supported])
-AC_COMPILE_IFELSE(
-  [AC_LANG_PROGRAM(
-    [#include <xmmintrin.h>],
-    [_MM_SET_FLUSH_ZERO_MODE (_MM_FLUSH_ZERO_ON);])], 
-  [ AC_MSG_RESULT([yes])
-    AC_DEFINE([HAVE_FLUSH_ZERO_MODE], 1, [Set to support FTZ, flush-to-zero mode])],
-  [ AC_MSG_RESULT([no]) ])
-
-AC_MSG_CHECKING([whether denormals-are-zero (DAZ) is supported])
-AC_COMPILE_IFELSE(
-  [AC_LANG_PROGRAM(
-    [#include <pmmintrin.h>],
-    [_MM_SET_DENORMALS_ZERO_MODE (_MM_DENORMALS_ZERO_ON);])], 
-  [ AC_MSG_RESULT([yes])
-    AC_DEFINE([HAVE_DENORMALS_ZERO_MODE], 1, [Set to support DAZ, denormals-are-zero mode])],
-  [ AC_MSG_RESULT([no]) ])
-
-CFLAGS="$esl_save_cflags"
+# miint: upstream probes here for flush-to-zero (FTZ) and
+# denormals-are-zero (DAZ) and defines HAVE_FLUSH_ZERO_MODE /
+# HAVE_DENORMALS_ZERO_MODE when they compile. The miint fork never
+# enables either, so the probes are gone and both stay #undef in
+# esl_config.h. FTZ/DAZ are per-thread CPU modes: miint's scores must
+# match an oracle built without them, and a library loaded into
+# another program must not change that program's floating point.
+# Checked by miint/check.sh (ftz-daz-off).
 
 
 
