@@ -2737,6 +2737,51 @@ utest_CreateFromIsInitialized(void)
   esl_alphabet_Destroy(abc);
 }
 
+/* utest_CopyLongMarkupTag()
+ * miint: esl_sq_Copy() must copy an extra residue markup tag of any
+ * length. It used to size each dst->xr_tag[x] by src->nalloc (the
+ * allocation for the sequence *name*) and then strcpy() the tag into
+ * it, overflowing the heap whenever the tag was longer than the name
+ * buffer (fixed upstream in 2c5f4b1). Tags come from Stockholm #=GR
+ * lines, so their length is the input's choice.
+ *
+ * Where the overflow lands depends on the allocator, so natively it
+ * can go unnoticed. Easel's level-3 "valgrind sq-utest" exercise
+ * (testsuite.sqc) reports it as an invalid write.
+ */
+static void
+utest_CopyLongMarkupTag(void)
+{
+  char    msg[] = "utest_CopyLongMarkupTag() failed";
+  char    tag[1024];
+  ESL_SQ *src = esl_sq_CreateFrom("seqname", "ACGT", NULL, NULL, NULL);
+  ESL_SQ *dst = esl_sq_Create();
+  int     status;
+
+  if (src == NULL || dst == NULL) esl_fatal(msg);
+  memset(tag, 'x', sizeof(tag)-1);
+  tag[sizeof(tag)-1] = '\0';
+  if (strlen(tag) < src->nalloc) esl_fatal(msg);  // the point: tag longer than the name allocation
+
+  src->nxr = 1;
+  ESL_ALLOC(src->xr_tag, sizeof(char *) * src->nxr);
+  ESL_ALLOC(src->xr,     sizeof(char *) * src->nxr);
+  if (esl_strdup(tag,    -1, &(src->xr_tag[0])) != eslOK) esl_fatal(msg);
+  if (esl_strdup("x.x.", -1, &(src->xr[0]))     != eslOK) esl_fatal(msg);
+
+  if (esl_sq_Copy(src, dst)             != eslOK) esl_fatal(msg);
+  if (dst->nxr                          != 1)     esl_fatal(msg);
+  if (strcmp(dst->xr_tag[0], tag)       != 0)     esl_fatal(msg);
+  if (strcmp(dst->xr[0],     "x.x.")    != 0)     esl_fatal(msg);
+
+  esl_sq_Destroy(src);
+  esl_sq_Destroy(dst);
+  return;
+
+ ERROR:
+  esl_fatal(msg);
+}
+
 #endif /* eslSQ_TESTDRIVE*/
 /*--------------------- end, unit tests -------------------------*/
 
@@ -2785,6 +2830,7 @@ main(int argc, char **argv)
 
   utest_ExtraResMarkups();
   utest_CreateFromIsInitialized();
+  utest_CopyLongMarkupTag();
 
   esl_randomness_Destroy(r);
   esl_getopts_Destroy(go);
