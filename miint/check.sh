@@ -78,6 +78,34 @@ check_ftz_daz() {
 }
 if [ $native_ok = 1 ]; then check_ftz_daz; else fail "ftz-daz-off" "no native build"; fi
 
+# --- emcc-build: libeasel.a compiles for WebAssembly, SSE code included --
+# duckdb-wasm builds Easel with Emscripten, through its emulation of
+# SSE on wasm SIMD128 (-msimd128 -msse -msse2; minimap2 does the same).
+# --enable-sse makes configure fail rather than quietly drop the SSE
+# code, and the eslENABLE_SSE test confirms it.
+EMCC_BUILD="$ROOT/build-miint-emcc"
+check_emcc() {
+  local errs name
+  if ! command -v emconfigure > /dev/null 2>&1; then
+    skip "emcc-build" "emconfigure not on PATH (source emsdk_env.sh)"; return
+  fi
+  name="emcc-build (emcc $(emcc --version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1))"
+  mkdir -p "$EMCC_BUILD"
+  if ! step "$EMCC_BUILD/configure.log" bash -c "cd '$EMCC_BUILD' && emconfigure '$ROOT/configure' \
+         --enable-sse --disable-threads CC=emcc CFLAGS='-O2 -msimd128 -msse -msse2'"; then
+    fail "$name" "configure failed"; return
+  fi
+  if ! grep -q '^#define eslENABLE_SSE 1' "$EMCC_BUILD/esl_config.h"; then
+    fail "$name" "configure did not enable the SSE code"; return
+  fi
+  if ! step "$EMCC_BUILD/make.log" emmake make -C "$EMCC_BUILD" -j8 -k libeasel.a; then
+    errs=$(grep -oE '[A-Za-z_0-9]+\.[ch]:[0-9]+:[0-9]+: error' "$EMCC_BUILD/make.log" | sort -u | tr '\n' ' ')
+    fail "$name" "libeasel.a: $errs"; return
+  fi
+  pass "$name"
+}
+if [ -x "$ROOT/configure" ]; then check_emcc; else fail "emcc-build" "no configure (autoconf failed)"; fi
+
 # --- summary ------------------------------------------------------------
 echo "----"
 echo "$npass passed, $nfail failed, ${#skipped[@]} skipped"

@@ -208,8 +208,15 @@ cpu_run_id(uint32_t eax, uint32_t ecx, uint32_t *abcd)
   uint32_t edx = 0;
 #if defined( __i386__ ) && defined ( __PIC__ )   /* in case of PIC under 32-bit EBX cannot be clobbered */
   __asm__ ( "movl %%ebx, %%edi \n\t cpuid \n\t xchgl %%ebx, %%edi" : "=D" (ebx), "+a" (eax), "+c" (ecx), "=d" (edx) );
-#else
+#elif defined( __x86_64__ ) || defined( __i386__ )
   __asm__ ( "cpuid" : "+b" (ebx), "+a" (eax), "+c" (ecx), "=d" (edx) );
+#else
+  /* miint: not x86, so no CPUID instruction. The SSE code is only built
+   * here through a compiler's emulation (Emscripten on wasm SIMD128).
+   * Report no features, so esl_cpu_has_sse() and the others return
+   * FALSE there. HMMER 3.4 never calls them.
+   */
+  eax = ecx = 0;
 #endif
   abcd[0] = eax; abcd[1] = ebx; abcd[2] = ecx; abcd[3] = edx;
 #endif // ! _MSC_VER
