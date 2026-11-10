@@ -38,7 +38,6 @@
 #endif
 
 #include "easel.h"
-#include <syslog.h>
 
 /*****************************************************************
  * 1. Exception and fatal error handling.
@@ -69,21 +68,15 @@ esl_fail(char *errbuf, const char *format, ...)
   if (format)
     {
       va_list ap;
-      /* Check whether we are running as a daemon so we can do the
-       * right thing about logging instead of printing errors 
+      /* miint: always fill <errbuf>, never syslog. Upstream sent the
+       * message to syslog instead when getppid() == 1, taken to mean
+       * "running as a daemon"; but a parent of PID 1 is common (a
+       * container's entrypoint, an orphan), and under WebAssembly
+       * getppid() is always 1. See miint/errmsg_check.c.
        */
-      if (getppid() != 1)
-	{ // we aren't running as a daemon, so print the error normally
-	  va_start(ap, format);
-	  if (errbuf) vsnprintf(errbuf, eslERRBUFSIZE, format, ap);
-	  va_end(ap);
-	}
-      else
-        {
-          va_start(ap, format);
-          vsyslog(LOG_ERR, format, ap); 
-          va_end(ap);
-        }
+      va_start(ap, format);
+      if (errbuf) vsnprintf(errbuf, eslERRBUFSIZE, format, ap);
+      va_end(ap);
     }
 }
 
@@ -146,25 +139,16 @@ esl_exception(int errcode, int use_errno, char *sourcefile, int sourceline, char
       va_end(argp);
       return;
     } 
-  else 
+  else
     {
-      /* Check whether we are running as a daemon so we can do the right thing about logging instead of printing errors */
-      if (getppid() != 1)
-	{ // we're not running as a daemon, so print the error normally
-	  fprintf(stderr, "Fatal exception (source file %s, line %d):\n", sourcefile, sourceline);
-	  va_start(argp, format);
-	  vfprintf(stderr, format, argp);
-	  va_end(argp);
-	  fprintf(stderr, "\n");
-	  if (use_errno && errno) perror("system error");
-	  fflush(stderr);
-	}  
-      else
-        {
-          va_start(argp, format);
-          vsyslog(LOG_ERR, format, argp);
-          va_end(argp);
-        }
+      /* miint: always print to stderr, never syslog (see esl_fail()). */
+      fprintf(stderr, "Fatal exception (source file %s, line %d):\n", sourcefile, sourceline);
+      va_start(argp, format);
+      vfprintf(stderr, format, argp);
+      va_end(argp);
+      fprintf(stderr, "\n");
+      if (use_errno && errno) perror("system error");
+      fflush(stderr);
 
 #ifdef HAVE_MPI
       MPI_Initialized(&mpiflag);                 /* we're assuming we can do this, even in a corrupted, dying process...? */
@@ -306,21 +290,12 @@ esl_fatal(const char *format, ...)
 #ifdef HAVE_MPI
   int mpiflag;
 #endif
-  /* Check whether we are running as a daemon so we can do the right thing about logging instead of printing errors */
-  if (getppid() != 1)
-    { // we're not running as a daemon, so print the error normally
-      va_start(argp, format);
-      vfprintf(stderr, format, argp);
-      va_end(argp);
-      fprintf(stderr, "\n");
-      fflush(stderr);
-    } 
-  else
-    {
-      va_start(argp, format);
-      vsyslog(LOG_ERR, format, argp);
-      va_end(argp);
-    }
+  /* miint: always print to stderr, never syslog (see esl_fail()). */
+  va_start(argp, format);
+  vfprintf(stderr, format, argp);
+  va_end(argp);
+  fprintf(stderr, "\n");
+  fflush(stderr);
 
 #ifdef HAVE_MPI
   MPI_Initialized(&mpiflag);
