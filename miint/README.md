@@ -27,8 +27,10 @@ or a miint patch. Every miint patch carries a test that failed before it and pas
 | `3301c9a` | miint | `configure.ac` no longer probes for FTZ/DAZ, so `HAVE_FLUSH_ZERO_MODE` and `HAVE_DENORMALS_ZERO_MODE` are never defined. No Easel source reads them; HMMER's `impl_Init()` does. | `miint/check.sh` `ftz-daz-off`: before the patch, the generated `esl_config.h` defined both. |
 | `22784b3` | miint | `esl_sse.c`/`.h` and `m4/esl_sse.m4` include `<emmintrin.h>` (plus `<smmintrin.h>` under `eslENABLE_SSE4`), not `<x86intrin.h>`. `<x86intrin.h>` exists only on x86, so it does not compile under Emscripten. | `miint/check.sh` `emcc-build`. |
 | `81bde25` | miint | `esl_cpu.c`: the `cpuid` inline asm is compiled only on x86. Elsewhere `esl_cpu_has_*()` returns FALSE. HMMER 3.4 never calls those functions. | `miint/check.sh` `emcc-build`: before `22784b3`, configure's SSE probe failed; between `22784b3` and this commit, the build failed only at `esl_cpu.c`; after it, the build passes. |
+| `d297d44` | upstream `3fd1f3f` | Completes `2c5f4b1`: `esl_sq_Copy()` copies a NULL markup tag or annotation as NULL. It left `dst->xr_tag[x]` uninitialized, which `esl_sq_Destroy()` then frees, and gave a NULL annotation an allocated, uninitialized buffer. | `utest_CopyNullMarkup` (`811023e`). |
+| `811023e` | miint (test only) | Tests `esl_sq_Copy()` with a NULL markup tag and a NULL annotation. | `utest_CopyNullMarkup`: before `3fd1f3f`, "NULL tag not copied as NULL" (natively; the heap is dirtied first), and valgrind reports an uninitialised read. |
 
-After those, two housekeeping commits: `.gitignore` ignores `configure~`, and this README.
+Housekeeping commits sit among them: `.gitignore` ignores `configure~`, and this README.
 
 ## Testing
 
@@ -52,12 +54,9 @@ A missing tool prints `SKIP` with the reason, and the summary lists it again. Th
 fails. Its helpers (`pass`, `fail`, `skip`, `step`) are copied in HMMER's `miint/check.sh`. That duplication is
 deliberate: each fork stands alone.
 
-## Known upstream bugs left alone
+## Known upstream bug left alone
 
-duckdb-miint is designed to avoid both, so neither gets a patch here.
+duckdb-miint is designed to avoid it, so it gets no patch here.
 
 - `esl_sq_CreateDigitalFrom(..., n = -1, ...)` computes the length into `sq->n`, but then sets `end`, `W` and `L`
   from `n`, so all three come out -1. Upstream develop is the same. duckdb-miint passes the length explicitly.
-- `esl_sq_Copy()` after `2c5f4b1` leaves `dst->xr_tag[x]` uninitialized when the source tag is NULL. Upstream
-  develop fixes this in `3fd1f3f`, which applies cleanly here but is not picked. duckdb-miint's sequences come
-  from table columns and carry no residue markup (`nxr` is 0), so the loop never runs.
