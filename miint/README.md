@@ -5,12 +5,13 @@ Branch `v0.49-miint` is Easel tag `easel-0.49` (`07ca83b`) plus the commits list
 submodule. [duckdb-miint](https://github.com/the-miint/duckdb-miint) links the two into DuckDB, natively and as
 WebAssembly (duckdb-wasm).
 
-That use sets three requirements stock Easel 0.49 does not meet:
+That use sets four requirements stock Easel 0.49 does not meet:
 
 - **In-process.** Easel runs inside the host's process. An error must come back to the caller with its message.
 - **WebAssembly.** The library must compile with Emscripten, SSE code included (emulated on wasm SIMD128).
 - **Parity.** Scores must match a CLI oracle built from these forks. Easel must never turn on the x86
   flush-to-zero (FTZ) or denormals-are-zero (DAZ) modes, which change floating point results.
+- **C++.** duckdb-miint includes the headers from C++, so they must compile as C++17.
 
 Each commit is either an upstream commit cherry-picked with `-x` (its message ends "cherry picked from commit …")
 or a miint patch. Every miint patch carries a test that failed before it and passes after.
@@ -29,6 +30,7 @@ or a miint patch. Every miint patch carries a test that failed before it and pas
 | `81bde25` | miint | `esl_cpu.c`: the `cpuid` inline asm is compiled only on x86. Elsewhere `esl_cpu_has_*()` returns FALSE. HMMER 3.4 never calls those functions. | `miint/check.sh` `emcc-build`: before `22784b3`, configure's SSE probe failed; between `22784b3` and this commit, the build failed only at `esl_cpu.c`; after it, the build passes. |
 | `d297d44` | upstream `3fd1f3f` | Completes `2c5f4b1`: `esl_sq_Copy()` copies a NULL markup tag or annotation as NULL. It left `dst->xr_tag[x]` uninitialized, which `esl_sq_Destroy()` then frees, and gave a NULL annotation an allocated, uninitialized buffer. | `utest_CopyNullMarkup` (`811023e`). |
 | `811023e` | miint (test only) | Tests `esl_sq_Copy()` with a NULL markup tag and a NULL annotation. | `utest_CopyNullMarkup`: before `3fd1f3f`, "NULL tag not copied as NULL" (natively; the heap is dirtied first), and valgrind reports an uninitialised read. |
+| `d84a153` | miint | `esl_neon.h` and `esl_sse.h` drop `register` from three locals. C++17 removed the storage class and Clang rejects it, so neither header compiled in duckdb-miint's C++ code. Upstream develop still has all three. | `miint/check.sh` `cxx17-simd-header`: before the patch, `esl_neon.h` failed it on arm64 (Apple clang). `esl_sse.h`, compiled the same way for x86_64, failed too. |
 
 Housekeeping commits sit among them: `.gitignore` ignores `configure~`, and this README.
 
@@ -48,6 +50,7 @@ any directory) covers the cases a test driver cannot set up for itself. It build
 | `native-build` | `libeasel.a` builds with the host compiler. Other checks build on it. | a C compiler, autoconf |
 | `errmsg-pid1` | Error messages reach the caller, or stderr, under a PID-1 parent. | `unshare` with unprivileged user namespaces |
 | `ftz-daz-off` | configure defines neither FTZ nor DAZ. | — |
+| `cxx17-simd-header` | The SIMD header configure enabled (`esl_neon.h` on arm64, `esl_sse.h` on x86-64) compiles as C++17. | a C++ compiler |
 | `emcc-build` | `libeasel.a` compiles for WebAssembly with `--enable-sse` and `-msimd128 -msse -msse2`, and configure enabled the SSE code. | `emconfigure`/`emcc` on `PATH` (tested with emsdk 6.0.9 and 3.1.71) |
 
 A missing tool prints `SKIP` with the reason, and the summary lists it again. The script exits 1 if any check
