@@ -78,6 +78,26 @@ check_ftz_daz() {
 }
 if [ $native_ok = 1 ]; then check_ftz_daz; else fail "ftz-daz-off" "no native build"; fi
 
+# --- cxx17-simd-header: the host's SIMD header compiles as C++17 -------
+# duckdb-miint includes Easel's headers from C++. C++17 removed the
+# `register` storage class, and Clang rejects it; -Werror=register fails
+# a compiler that only warns, too. The header is the one configure
+# enabled on this host: esl_neon.h on arm64, esl_sse.h on x86-64.
+check_cxx17_simd_header() {
+  local hdr src="$NATIVE/cxx17_simd_header.cpp"
+  if grep -q '^#define eslENABLE_NEON 1' "$NATIVE/esl_config.h"; then hdr=esl_neon.h
+  elif grep -q '^#define eslENABLE_SSE 1' "$NATIVE/esl_config.h"; then hdr=esl_sse.h
+  else skip "cxx17-simd-header" "configure enabled neither the SSE nor the NEON code"; return
+  fi
+  printf '#include "easel.h"\n#include "%s"\n' "$hdr" > "$src"
+  if step "$NATIVE/cxx17_simd_header.log" ${CXX:-c++} -std=c++17 -Werror=register \
+       -fsyntax-only -I"$NATIVE" -I"$ROOT" "$src"
+  then pass "cxx17-simd-header ($hdr)"
+  else fail "cxx17-simd-header ($hdr)" "does not compile as C++17"
+  fi
+}
+if [ $native_ok = 1 ]; then check_cxx17_simd_header; else fail "cxx17-simd-header" "no native build"; fi
+
 # --- emcc-build: libeasel.a compiles for WebAssembly, SSE code included --
 # duckdb-wasm builds Easel with Emscripten, through its emulation of
 # SSE on wasm SIMD128 (-msimd128 -msse -msse2; minimap2 does the same).
